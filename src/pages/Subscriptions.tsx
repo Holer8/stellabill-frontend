@@ -1,3 +1,4 @@
+import SwipeableRow from "../components/SwipeableRow";
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -9,6 +10,7 @@ import UsageThisPeriod from "../components/UsageThisPeriod";
 import ErrorState from "../components/ErrorState";
 import Tag from "../components/Tag";
 import AddTagPopover, { TagOption } from "../components/AddTagPopover";
+import { useRefresh } from "../hooks/useRefresh";
 import { useFlip } from "../hooks/useFlip";
 import "./Subscriptions.css";
 
@@ -442,6 +444,28 @@ export default function Subscriptions() {
 		enabled: !loading && filteredData.length > 0,
 	});
 
+	const [customTags, setCustomTags] = useState<TagOption[]>([
+		{ id: "t-priority", label: "Priority", color: "red" },
+		{ id: "t-team", label: "Team", color: "blue" },
+		{ id: "t-trial", label: "Trial", color: "yellow" },
+	]);
+	const availableTags = customTags;
+
+	const updateTags = (subId: string, fn: (tags: TagOption[]) => TagOption[]) =>
+		setData((prev) => prev.map((sub) => (sub.id === subId ? { ...sub, tags: fn(sub.tags ?? []) } : sub)));
+
+	const handleAddTag = (subId: string, tag: TagOption) =>
+		updateTags(subId, (tags) => (tags.some((t) => t.id === tag.id) ? tags : [...tags, tag]));
+
+	const handleRemoveTag = (subId: string, tagId: string) =>
+		updateTags(subId, (tags) => tags.filter((t) => t.id !== tagId));
+
+	const handleCreateTag = (label: string, color: TagOption["color"]) => {
+		const tag: TagOption = { id: `t-${Date.now()}`, label, color };
+		setCustomTags((prev) => [...prev, tag]);
+		if (selectedId) handleAddTag(selectedId, tag);
+	};
+
 	const selectedSub = useMemo(
 		() => data.find((sub) => sub.id === selectedId),
 		[selectedId, data],
@@ -727,7 +751,6 @@ export default function Subscriptions() {
 					Home
 				</Link>
 				<span className="breadcrumb-separator" aria-hidden="true">/</span>
-				<span className="breadcrumb-current" aria-current="page">My subscriptions</span>
 				<span className="breadcrumb-current" aria-current="page">{t('subscriptions.pageTitle')}</span>
 			</nav>
 
@@ -796,6 +819,7 @@ export default function Subscriptions() {
 								<th scope="col">{t('subscriptions.table.plan')}</th>
 								<th scope="col">{t('subscriptions.table.status')}</th>
 								<th scope="col">{t('subscriptions.table.price')}</th>
+								<th scope="col">Tags</th>
 								<th scope="col">{t('subscriptions.table.nextCharge')}</th>
 								<th scope="col">{t('subscriptions.table.prepaidBalance')}</th>
 								<th scope="col">
@@ -907,19 +931,56 @@ export default function Subscriptions() {
 						ref={cardsContainerRef as React.RefObject<HTMLDivElement>}
 						className="subs-cards"
 						aria-label="Subscriptions"
-						data-testid="subscriptions-cards">
-						{filteredData.map((sub) => (
-							<article
-								key={sub.id}
-								{...getCardItemProps(sub.id)}
-								className="subs-card"
-								tabIndex={0}
-								role="button"
-								aria-label={`${sub.planName} – ${sub.status}. Tap to manage.`}
-								onClick={() => setSelectedId(sub.id)}
-								onKeyDown={(e) => {
-									if (e.key === "Enter" || e.key === " ") {
-										e.preventDefault();
+						data-testid="subscriptions-cards"
+						{...refreshHandlers}
+					>
+						{/* Polite live region for accessibility announcements */}
+						<div className="visually-hidden" aria-live="polite">
+							{isRefreshing ? t('subscriptions.refreshing', 'Refreshing subscriptions...') : ''}
+						</div>
+						
+						{/* Fallback Refresh Button for keyboard users and screen readers */}
+						<button 
+							className="ptr-fallback-btn"
+							onClick={triggerRefresh}
+							aria-label="Refresh subscriptions"
+						>
+							<IconPlay />
+							<span className="visually-hidden">Refresh</span>
+						</button>
+
+						{/* Pull-to-refresh visual indicator */}
+						<div 
+							className="ptr-indicator"
+							style={{ 
+								height: `${Math.min(pullDistance, 100)}px`,
+								opacity: pullDistance > 10 ? 1 : 0
+							}}
+							aria-hidden="true"
+						>
+							{isRefreshing || pullDistance > 0 ? (
+								<div className={`ptr-spinner ${isRefreshing ? 'spinning' : ''}`} style={{ transform: `rotate(${pullDistance * 3}deg)` }}>
+									<IconCog />
+								</div>
+							) : null}
+						</div>
+
+						<div 
+							className="subs-cards-inner"
+							style={{ transform: `translateY(${pullDistance}px)` }}
+						>
+						{filteredData.map((sub) => {
+							const leadingActions: any[] = [];
+							const trailingActions: any[] = [];
+
+							if (sub.status === "Active") {
+								trailingActions.push({
+									id: "pause",
+									label: "Pause",
+									icon: <IconPause />,
+									backgroundColor: "#f59e0b", // amber-500
+									color: "#fff",
+									onClick: () => {
 										setSelectedId(sub.id);
 										setIsPauseModalOpen(true);
 									}
@@ -1028,6 +1089,7 @@ export default function Subscriptions() {
 								</article>
 							</SwipeableRow>
 						)})}
+						</div>
 					</div>
 				</>
 			)}
@@ -1049,3 +1111,4 @@ export default function Subscriptions() {
 		</div>
 	);
 }
+
